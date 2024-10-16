@@ -104,7 +104,7 @@ grafana_deployment = Deployment(
                 "containers": [{
                     "name": "grafana",
                     "image": "grafana/grafana:latest",
-                    "ports": [{"container_port": 3000}],
+                    "ports": [{"container_port": 3000, "host_port": 3000}],
                     "env": [
                         {"name": "GF_SERVER_ROOT_URL", "value": f"http://{domain_name}/grafana/"},
                         {"name": "GF_SERVER_SERVE_FROM_SUB_PATH", "value": "true"},
@@ -195,7 +195,7 @@ prometheus_deployment = Deployment(
                 "containers": [{
                     "name": "prometheus",
                     "image": "prom/prometheus:latest",
-                    "ports": [{"container_port": 9090}],
+                    "ports": [{"container_port": 9090, "host_port": 9090}],
                     "args": [
                         "--config.file=/etc/prometheus/prometheus.yml",
                         "--storage.tsdb.path=/prometheus",
