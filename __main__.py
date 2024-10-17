@@ -1,14 +1,40 @@
 import pulumi
 import pulumi_kubernetes as k8s
-from pulumi_kubernetes.core.v1 import Namespace, Service, Secret
-from pulumi_kubernetes.apps.v1 import Deployment
+from pulumi_kubernetes.core.v1 import Namespace, Service, Secret, ConfigMap
+from pulumi_kubernetes.apps.v1 import Deployment, DaemonSet
 from pulumi_kubernetes.networking.v1 import Ingress
 
 
-domain_name = "localhost"
+config = pulumi.Config()
 
 
-ns = Namespace("app-namespace")
+
+
+domain_name = config.get("domain_name")
+namespace_name = config.get("namespace_name")
+
+
+app_service_name = config.get("appServiceName")
+grafana_service_name = config.get("grafanaServiceName")
+prometheus_service_name = config.get("prometheusServiceName")
+node_exporter_service_name = config.get("nodeExporterServiceName")
+
+
+
+
+app_image = config.get("app_image")
+grafana_image = config.get("grafana_image")
+prometheus_image = config.get("prometheus_image")
+node_exporter_image = config.get("node_exporter_image")
+
+
+app_port = config.get_int("app_port")
+grafana_port = config.get_int("grafana_port")
+prometheus_port = config.get_int("prometheus_port")
+node_exporter_port = config.get_int("node_exporter_port")
+
+
+ns = Namespace(namespace_name)
 
 
 app_secret = Secret(
@@ -16,12 +42,14 @@ app_secret = Secret(
     metadata={"namespace": ns.metadata["name"]},
     string_data={
         "tls.crt": """-----BEGIN CERTIFICATE-----
-                    -----END CERTIFICATE-----""",
+-----END CERTIFICATE-----""",
         "tls.key": """-----BEGIN PRIVATE KEY-----
-                    -----END PRIVATE KEY-----"""
+-----END PRIVATE KEY-----"""
     }
 )
 
+
+# Application Deployment
 app_deployment = Deployment(
     "my-app-deployment",
     metadata={"namespace": ns.metadata["name"]},
@@ -32,25 +60,28 @@ app_deployment = Deployment(
             "spec": {
                 "containers": [{
                     "name": "my-app",
-                    "image": "smenaria/monitor-app:v1",
-                    "ports": [{"container_port": 5000}],
+                    "image": app_image,
+                    "ports": [{"container_port": app_port}]
                 }],
             },
         },
     },
 )
 
+
+# Application Service
 app_service = Service(
-    "my-app-service",
+    app_service_name,
     metadata={"namespace": ns.metadata["name"]},
     spec={
         "selector": app_deployment.spec.selector.match_labels,
-        "ports": [{"port": 5000, "target_port": 5000}],
+        "ports": [{"port": app_port, "target_port": app_port}],
         "type": "ClusterIP",
     },
 )
 
 
+# Grafana Deployment and Service
 grafana_deployment = Deployment(
     "grafana-deployment",
     metadata={"namespace": ns.metadata["name"]},
@@ -61,30 +92,32 @@ grafana_deployment = Deployment(
             "spec": {
                 "containers": [{
                     "name": "grafana",
-                    "image": "grafana/grafana:latest",
-                    "ports": [{"container_port": 3000, "host_port": 3000}],
+                    "image": grafana_image,
+                    "ports": [{"container_port": grafana_port}],
                     "env": [
                         {"name": "GF_SERVER_ROOT_URL", "value": f"http://{domain_name}/grafana/"},
                         {"name": "GF_SERVER_SERVE_FROM_SUB_PATH", "value": "true"},
-                    ]
+                    ],
                 }],
             },
         },
     },
 )
 
+
 grafana_service = Service(
-    "grafana-service",
+    grafana_service_name,
     metadata={"namespace": ns.metadata["name"]},
     spec={
         "selector": grafana_deployment.spec.selector.match_labels,
-        "ports": [{"port": 3000, "target_port": 3000}],
+        "ports": [{"port": grafana_port, "target_port": grafana_port}],
         "type": "ClusterIP",
     },
 )
 
 
-node_exporter_daemonset = k8s.apps.v1.DaemonSet(
+# Node Exporter DaemonSet and Service
+node_exporter_daemonset = DaemonSet(
     "node-exporter",
     metadata={"namespace": ns.metadata["name"]},
     spec={
@@ -94,8 +127,8 @@ node_exporter_daemonset = k8s.apps.v1.DaemonSet(
             "spec": {
                 "containers": [{
                     "name": "node-exporter",
-                    "image": "quay.io/prometheus/node-exporter:latest",
-                    "ports": [{"container_port": 9100, "host_port": 9100}],
+                    "image": node_exporter_image,
+                    "ports": [{"container_port": node_exporter_port}],
                     "volumeMounts": [
                         {"name": "proc", "mountPath": "/host/proc", "readOnly": True},
                         {"name": "sys", "mountPath": "/host/sys", "readOnly": True},
@@ -117,31 +150,35 @@ node_exporter_daemonset = k8s.apps.v1.DaemonSet(
 )
 
 
-prometheus_config = k8s.core.v1.ConfigMap(
+node_exporter_service = Service(
+    node_exporter_service_name,
+    metadata={"namespace": ns.metadata["name"]},
+    spec={
+        "selector": {"app": "node-exporter"},
+        "ports": [{"port": node_exporter_port, "target_port": node_exporter_port}],
+        "type": "ClusterIP",
+    }
+)
+
+
+# Prometheus ConfigMap
+prometheus_config = ConfigMap(
     "prometheus-config",
     metadata={"namespace": ns.metadata["name"]},
     data={
-        "prometheus.yml": """
+        "prometheus.yml": f"""
         global:
           scrape_interval: 15s
         scrape_configs:
           - job_name: 'node-exporter'
             static_configs:
-              - targets: ['node-exporter-service-1a98bfe6:9100']
+              - targets: ['{node_exporter_service.metadata["name"]}:{node_exporter_port}']
         """
     }
 )
 
-node_exporter_service = k8s.core.v1.Service(
-    "node-exporter-service",
-    metadata={"namespace": ns.metadata["name"]},
-    spec={
-        "selector": {"app": "node-exporter"},
-        "ports": [{"port": 9100, "target_port": 9100}],
-        "type": "ClusterIP",
-    }
-)
 
+# Prometheus Deployment and Service
 prometheus_deployment = Deployment(
     "prometheus-deployment",
     metadata={"namespace": ns.metadata["name"]},
@@ -152,8 +189,8 @@ prometheus_deployment = Deployment(
             "spec": {
                 "containers": [{
                     "name": "prometheus",
-                    "image": "prom/prometheus:latest",
-                    "ports": [{"container_port": 9090, "host_port": 9090}],
+                    "image": prometheus_image,
+                    "ports": [{"container_port": prometheus_port}],
                     "args": [
                         "--config.file=/etc/prometheus/prometheus.yml",
                         "--storage.tsdb.path=/prometheus",
@@ -165,62 +202,62 @@ prometheus_deployment = Deployment(
                         "subPath": "prometheus.yml"
                     }],
                     "securityContext": {
-                        "runAsUser": 65534, 
+                        "runAsUser": 65534,
                         "runAsGroup": 65534,
-                        "fsGroup": 65534
-                    }
+                        "fsGroup": 65534,
+                    },
                 }],
                 "volumes": [{
                     "name": "config-volume",
                     "configMap": {
                         "name": prometheus_config.metadata["name"],
-                        "items": [{
-                            "key": "prometheus.yml",
-                            "path": "prometheus.yml"
-                        }]
+                        "items": [{"key": "prometheus.yml", "path": "prometheus.yml"}]
                     }
-                }]
-            }
-        }
-    }
+                }],
+            },
+        },
+    },
 )
 
+
 prometheus_service = Service(
-    "prometheus-service",
+    prometheus_service_name,
     metadata={"namespace": ns.metadata["name"]},
     spec={
         "selector": prometheus_deployment.spec.selector.match_labels,
-        "ports": [{"port": 9090, "target_port": 9090}],
+        "ports": [{"port": prometheus_port, "target_port": prometheus_port}],
         "type": "ClusterIP",
     }
 )
 
 
+# Ingress
 ingress = Ingress(
     "app-ingress",
     metadata={
         "namespace": ns.metadata["name"],
         "annotations": {
             "kubernetes.io/ingress.class": "nginx",
-             "nginx.ingress.kubernetes.io/ssl-redirect": "true",
-            #  "nginx.ingress.kubernetes.io/rewrite-target": "/$2"
+            "nginx.ingress.kubernetes.io/ssl-redirect": "true",
         },
     },
     spec={
-        "tls": [{"hosts": ["localhost"], "secretName": app_secret.metadata["name"]}],
+        "tls": [{"hosts": [domain_name], "secretName": app_secret.metadata["name"]}],
         "rules": [{
-            "host": "localhost",
+            "host": domain_name,
             "http": {
                 "paths": [
-                    {"path": "/", "pathType": "Prefix", "backend": {"service": {"name": app_service.metadata["name"], "port": {"number": 5000}}}},
-                    {"path": "/grafana", "pathType": "Prefix", "backend": {"service": {"name": grafana_service.metadata["name"], "port": {"number": 3000}}}},
-                    {"path": "/prometheus", "pathType": "Prefix", "backend": {"service": {"name": prometheus_service.metadata["name"], "port": {"number": 9090}}}},
-                ]
-            }
-        }]
+                    {"path": "/", "pathType": "Prefix", "backend": {"service": {"name": app_service.metadata["name"], "port": {"number": app_port}}}},
+                    {"path": "/grafana", "pathType": "Prefix", "backend": {"service": {"name": grafana_service.metadata["name"], "port": {"number": grafana_port}}}},
+                    {"path": "/prometheus", "pathType": "Prefix", "backend": {"service": {"name": prometheus_service.metadata["name"], "port": {"number": prometheus_port}}}},
+                ],
+            },
+        }],
     }
 )
 
-pulumi.export("app_url", "https://localhost/")
-pulumi.export("grafana_url", "https://localhost/grafana")
-pulumi.export("prometheus_url", "https://localhost/prometheus")
+
+# Exports
+pulumi.export("app_url", f"https://{domain_name}/")
+pulumi.export("grafana_url", f"https://{domain_name}/grafana")
+pulumi.export("prometheus_url", f"https://{domain_name}/prometheus")
