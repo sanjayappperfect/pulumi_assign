@@ -1,0 +1,17 @@
+config:
+  pulumi_assign:domain_name: "localhost"  
+  pulumi_assign:namespace_name: "pulumi"  
+  pulumi_assign:appServiceName: "my-app-service"  
+  pulumi_assign:grafanaServiceName: "grafana-service" 
+  pulumi_assign:prometheusServiceName: "prometheus-service" 
+  pulumi_assign:nodeExporterServiceName: "node-exporter-service"  
+
+  pulumi_assign:app_image: "smenaria/monitor-app:v1" 
+  pulumi_assign:grafana_image: "grafana/grafana:latest"  
+  pulumi_assign:prometheus_image: "prom/prometheus:latest"  
+  pulumi_assign:node_exporter_image: "quay.io/prometheus/node-exporter:latest"
+
+  pulumi_assign:app_port: 5000  
+  pulumi_assign:grafana_port: 3000  
+  pulumi_assign:prometheus_port: 9090  
+  pulumi_assign:node_exporter_port: 9100
